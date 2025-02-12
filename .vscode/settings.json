@@ -1,0 +1,29 @@
+{
+    "files.associations": {
+        "config_uart0.h": "c",
+        "custom_func.h": "c",
+        "platform.h": "c",
+        "r_smc_entry.h": "c",
+        "iodefine.h": "c",
+        "r_bsp.h": "c",
+        "r_rfd_common_userown.h": "c",
+        "r_rfd_common_control_api.h": "c",
+        "misc_config.h": "c",
+        "string.h": "c",
+        "printf.h": "c",
+        "sample_control_code_flash.h": "c",
+        "i2c_download_protocol.h": "c",
+        "r_typedefs.h": "c",
+        "sample_defines.h": "c",
+        "sample_control_common.h": "c",
+        "stdio.h": "c",
+        "sample_memmap.h": "c",
+        "r_rfd_common_api.h": "c",
+        "r_rfd_memmap.h": "c",
+        "sample_types.h": "c",
+        "r_rfd_code_flash_api.h": "c",
+        "xutility": "c",
+        "xmemory": "c"
+    },
+    "C_Cpp.dimInactiveRegions": false
+}

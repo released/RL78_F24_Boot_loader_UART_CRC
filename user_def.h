@@ -117,13 +117,12 @@ extern "C" {
 
 
 #define ENABLE_UART_PRINTF                      (1)
-#define ENABLE_UART_BL                          (1)
+#define ENABLE_UART_BL                          (0)
 
 #define ENALBE_TIMER_TAU0_1_IRQ                 (1)
 
-#define ENALBE_IICA0_BL                         (0)
+#define ENALBE_IICA0_BL                         (1)
 #if ENALBE_IICA0_BL
-#define ENALBE_IICA0_BL_USE_POLLING             (0)
 #define ENALBE_IICA0_BL_USE_IRQ                 (1)
 #endif
 

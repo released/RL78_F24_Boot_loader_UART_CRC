@@ -111,6 +111,7 @@ uint32_t volatile   flash_target_memory_size = 0;
 uint32_t volatile   flash_memory_destination_address = 0;
 volatile bool g_flash_operation_progressing = false;
 volatile bool g_app_required_update = false;
+volatile bool slv_write_start_flag = false;
 
 #if ENALBE_IICA0_BL
 //I2C relative data
@@ -132,19 +133,14 @@ const uint8_t device_memory_switch_app_ok[7] = {DATA_PACKET_START, 0x00, 0x02, S
 
 const uint8_t device_part_number[13] = "RL78_F24_FPB";
 
-uint8_t slv_write_start_flag = 0;
 
 void ErrorHandler(uint8_t);
 // uint8_t WriteCodeFlash(uint32_t u32_start_addr, uint8_t * u8_write_data, uint32_t u32_write_data_len);
 
 
 #if ENALBE_IICA0_BL_USE_IRQ
-void __near I2C_Downloader_routine_ISR(void);
+void __near I2C_Downloader_routine_IRQ(void);
 #endif
-
-#if ENALBE_IICA0_BL_USE_POLLIN
-void I2C_Downloader_routine(void);
-#endif 
 
 static void transmit_handler(i2c_downloader_ctrl_t * p_i2c_downloader_ctrl);
 static void received_handler(i2c_downloader_ctrl_t * p_i2c_downloader_ctrl);
@@ -588,8 +584,7 @@ static void received_handler(i2c_downloader_ctrl_t * p_i2c_downloader_ctrl)
                 /* receive data packet of write transfer */
                 p_i2c_downloader_ctrl->write_data_length = (decode16bit(&p_i2c_downloader_ctrl->p_rxbuff[1]) - 1); // Length of "RES+DATA"
                 p_i2c_downloader_ctrl->resp_type = WRITE_MEMORY_NEXT;
-
-                slv_write_start_flag = 1;                
+                slv_write_start_flag = true;                
             }
             break;
         }
@@ -837,7 +832,7 @@ void __near boot_r_Config_IICA0_interrupt(void)
 	{
         if (0U == (IICS0 & _80_IICA_STATUS_MASTER))
         {            
-            I2C_Downloader_routine_ISR();   // r_Config_IICA0_slave_handler();
+            I2C_Downloader_routine_IRQ();   // r_Config_IICA0_slave_handler();
         }
 	}
 	if(_no_init_global[RAM_FLAG_INDICATE_BOOT_APP] == 0x55)   //user app ISR address
@@ -849,7 +844,7 @@ void __near boot_r_Config_IICA0_interrupt(void)
 	}
 }
 
-void __near I2C_Downloader_routine_ISR(void)
+void __near I2C_Downloader_routine_IRQ(void)
 {
     //if STOP condition is received
     if (1U == SPD0)
@@ -980,152 +975,6 @@ void __near I2C_Downloader_routine_ISR(void)
             }
         }
     }
-}
-#endif
-
-#if ENALBE_IICA0_BL_USE_POLLING
-void I2C_Downloader_routine(void)
-{
-	downloader_iica0_tx_cnt = 0U;
-	downloader_iica0_slave_status_flag = 0U;
-
-	//Start I2C operation
-	IICE0 = 1U;
-
-	while(1)
-	{
-		//wait for an I2C intterupt flag set
-		while(IICAIF0 == 0U){};
-		//clear the interrupt flag
-		IICAIF0 = 0;
-
-		//if STOP condition is received
-		if (1U == SPD0)
-		{
-			//Disable STOP condition detection/interrupt generation
-			SPIE0 = 0U;
-			WREL0 = 1U;
-			downloader_iica0_slave_status_flag = 0U;
-			break;
-		}
-		else
-		{
-			//for I2C repeated start (restart)
-			if(1U == STD0){
-				downloader_iica0_slave_status_flag = 0;
-			}
-
-			if (0U == (downloader_iica0_slave_status_flag & _80_IICA_ADDRESS_COMPLETE))
-			{
-				//Address match
-				if (1U == COI0)
-				{
-					//Enable STOP condition detection/interrupt generation
-					SPIE0 = 1U;
-					downloader_iica0_slave_status_flag |= _80_IICA_ADDRESS_COMPLETE;
-
-					//I2C slave transmit requested
-					if (1U == TRC0)
-					{
-						//Change interrupt generation from 8 th to 9 th falling edge
-						WTIM0 = 1U;
-
-						transmit_handler(&i2c_downloader_ctrl);
-						i2c_downloader_ctrl.resp_type = NONE_RESP;
-						//if there is something to send
-						if (i2c_downloader_ctrl.txbyteCnt != 0U)
-						{
-							IICA0 = i2c_downloader_ctrl.p_txbuff[downloader_iica0_tx_cnt];
-							downloader_iica0_tx_cnt++;
-							i2c_downloader_ctrl.txbyteCnt -= downloader_iica0_tx_cnt;
-						}
-						else
-						{
-							#if 1 //Send dummy data?
-							IICA0 = 0;
-							#endif
-							//release clock stretching
-							WREL0 = 1U;
-						}
-					}
-					//I2C slave receive requested
-					else
-					{
-						// receive data portion of Master Write Slave Read is started from here
-						downloader_iica0_rx_cnt = 0;
-						ACKE0 = 1U; //Enable ACK
-						WTIM0 = 0U; //Change interrupt generation from 9 th to 8 th falling edge for slave read data
-						WREL0 = 1U; //release clock stretching
-					}
-				}
-			}
-			else
-			{
-				//I2C slave transmit requested
-				if (1U == TRC0)
-				{
-					//ACK was not detected
-					if (0U == ACKD0)
-					{
-						//release clock stretching
-						WREL0 = 1U;
-					}
-					else
-					{
-						if (i2c_downloader_ctrl.txbyteCnt != 0U)
-						{
-							IICA0 = i2c_downloader_ctrl.p_txbuff[downloader_iica0_tx_cnt];
-							downloader_iica0_tx_cnt++;
-							i2c_downloader_ctrl.txbyteCnt -= downloader_iica0_tx_cnt;
-						}
-						else
-						{
-							//exit from communication mode
-							LREL0 = 1U;
-						}
-					}
-				}
-				//I2C slave receive requested
-				else
-				{
-					i2c_downloader_ctrl.p_rxbuff[downloader_iica0_rx_cnt] = IICA0;
-					if(COMMUNICATION_SETTING_PHASE == i2c_downloader_ctrl.downloader_operation_phase)
-					{
-	                    if(i2c_downloader_ctrl.p_rxbuff[0] == BOOT_MODE_CHECK_CMD)
-	                    {
-	                    	i2c_downloader_ctrl.resp_type = BOOT_MODE_ACK_RESPOND;
-	                    	i2c_downloader_ctrl.downloader_operation_phase = AUTHENTICATION_PHASE;
-	                    }
-
-	                    WTIM0 = 1U; //Change interrupt generation from 8 th to 9 th falling edge for slave write data
-	                    WREL0 = 1U; //release clock stretching
-					}
-					else
-					{
-						downloader_iica0_rx_cnt++;
-						if(downloader_iica0_rx_cnt > 3)
-						{
-							i2c_downloader_ctrl.recv_cmd = i2c_downloader_ctrl.p_rxbuff[3];
-				            target_recv_data_size_set(&i2c_downloader_ctrl);
-						}
-						else if(downloader_iica0_rx_cnt > MAXIMUM_RECV_PACKET_SIZE)
-						{
-							downloader_iica0_rx_cnt = 0;
-						}
-
-						if((INVALID_CMD_BYTE != i2c_downloader_ctrl.recv_cmd) &&
-						   (downloader_iica0_rx_cnt == i2c_downloader_ctrl.rxbyteCnt))
-						{
-							received_handler(&i2c_downloader_ctrl);
-							WTIM0 = 1U; //Change interrupt generation from 8 th to 9 th falling edge for slave write data
-						}
-
-						WREL0 = 1U; //release clock stretching
-					}
-				}
-			}
-		}
-	}
 }
 #endif
 
@@ -2511,10 +2360,6 @@ void boot_main(void)
             }
             #endif
 
-            #if ENALBE_IICA0_BL_USE_POLLING
-			I2C_Downloader_routine();
-            #endif
-
 			if(ERASE_MEMORY == i2c_downloader_ctrl.resp_type)
 			{
                 // EraseCodeFlash();
@@ -2523,10 +2368,10 @@ void boot_main(void)
 			}
 
 			if  ((WRITE_MEMORY_NEXT == i2c_downloader_ctrl.resp_type) &&
-                (slv_write_start_flag == 1))
+                (slv_write_start_flag == true))
 			{   
                 // printf_tiny("(boot)I2C transfer:WRITE_MEMORY_NEXT\r\n");
-                slv_write_start_flag = 0;
+                slv_write_start_flag = false;
 
 				if ((flash_memory_destination_address >= flash_memory_start_address) &&
 					(flash_memory_destination_address < flash_memory_end_address))
